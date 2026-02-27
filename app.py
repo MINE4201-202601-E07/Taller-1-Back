@@ -86,6 +86,8 @@ MOVIES = [
     }
 ]
 
+# Base de datos en memoria para usuarios (en producción usar una BD real)
+USERS = {}
 
 app = Flask(__name__)
 CORS(app)
@@ -96,10 +98,111 @@ def startup():
     print("✓ Application started successfully!")
     print("✓ Server is running on http://localhost:5000")
     print("✓ Available endpoints:")
+    print("  - POST /auth/signup")
+    print("  - POST /auth/login")
     print("  - GET /sr_user_user?text=<string>")
     print("  - GET /sr_item_item?text=<string>")
     print("  - GET /resync")
     print("  - GET /health")
+
+
+@app.route('/auth/signup', methods=['POST'])
+def signup():
+    """Endpoint para registrar un nuevo usuario"""
+    try:
+        data = request.get_json()
+        
+        # Validación del email
+        if not data or not data.get('email'):
+            return jsonify({
+                'success': False,
+                'message': 'Email is required'
+            }), 400
+        
+        email = data.get('email')
+        
+        # Verificar si el email ya está registrado
+        for existing_user in USERS.values():
+            if existing_user['email'] == email:
+                return jsonify({
+                    'success': False,
+                    'message': 'Email already registered'
+                }), 400
+        
+        # Generar nuevo ID basado en la última entrada
+        if USERS:
+            last_id = max(int(user_id) for user_id in USERS.keys())
+            new_id = str(last_id + 1)
+        else:
+            new_id = "1"
+        
+        # Crear nuevo usuario
+        USERS[new_id] = {
+            'id': new_id,
+            'email': email
+        }
+        
+        return jsonify({
+            'success': True,
+            'message': 'User registered successfully',
+            'user': {
+                'id': new_id,
+                'email': email
+            }
+        }), 201
+        
+    except Exception as error:
+        print(f"Error in signup: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error creating user'
+        }), 500
+
+
+@app.route('/auth/login', methods=['POST'])
+def login():
+    """Endpoint para autenticar un usuario"""
+    try:
+        data = request.get_json()
+        
+        # Validación del ID en lugar del email
+        if not data or not data.get('id'):
+            return jsonify({
+                'success': False,
+                'message': 'ID is required'
+            }), 400
+        
+        user_id = data.get('id')
+        print(f"Attempting login with ID: {user_id}")
+        print(f"Current users in system: {USERS}")
+        # Buscar usuario por ID
+        user = None
+        for existing_user in USERS.keys():
+            if existing_user == user_id:
+                user = USERS[existing_user]
+                break
+        
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid ID'
+            }), 401
+        
+        return jsonify({
+            'success': True,
+            'message': 'Login successful',
+            'user': {
+                'id': user['id'],
+                'email': user['email']
+            }
+        }), 200
+        
+    except Exception as error:
+        print(f"Error in login: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error during login'
+        }), 500
 
 
 @app.route('/sr_user_user', methods=['GET'])
