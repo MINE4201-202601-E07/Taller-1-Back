@@ -204,6 +204,11 @@ def login():
             'message': 'Error during login'
         }), 500
 
+@app.route('/user', methods=['GET'])
+def get_user():
+    user_id = request.args.get('userId', type=int)
+    user = USERS.get(user_id)
+    return jsonify({'user': user})
 
 @app.route('/sr_user_user', methods=['GET'])
 def sr_user_user():
