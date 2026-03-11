@@ -1,2 +1,4 @@
 node_modules/
 *.pyc
+modules/users/__pycache__/*.cpython-314.pyc
+modules/users/__pycache__/user_service.cpython-314.pyc
