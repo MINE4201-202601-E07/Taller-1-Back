@@ -175,32 +175,37 @@ def login():
     try:
         data = request.get_json()
         
-        # Validación del ID en lugar del email
+        # Validación del ID
         if not data or not data.get('id'):
             return jsonify({
                 'success': False,
                 'message': 'ID is required'
             }), 400
         
+        user_id = data.get('id')
+        
         db = next(get_db())
         
-        user_id = data.get('id')
-        user = UserService.get_user_by_id(db, user_id)
-        
-        if not user_id:
+        try:
+            user = UserService.get_user_by_id(db, user_id)
+            
+            if not user:
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid ID'
+                }), 401
+            
             return jsonify({
-                'success': False,
-                'message': 'Invalid ID'
-            }), 401
-        
-        return jsonify({
-            'success': True,
-            'message': 'Login successful',
-            'user': {
-                'id': user['id'],
-                'email': user['email']
-            }
-        }), 200
+                'success': True,
+                'message': 'Login successful',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name
+                }
+            }), 200
+        finally:
+            db.close()
         
     except Exception as error:
         print(f"Error in login: {error}")
