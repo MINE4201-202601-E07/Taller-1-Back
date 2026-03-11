@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import random
+from database.connection import engine, Base, get_db
+from modules.users.user_movie_preference_service import UserMoviePreferenceService
+from modules.users.user_movie_preference_model import UserMoviePreference
 
 # Conjunto de películas disponibles
 MOVIES = [
@@ -92,6 +95,9 @@ USERS = {}
 app = Flask(__name__)
 CORS(app)
 
+# Crear tablas de la base de datos
+Base.metadata.create_all(bind=engine)
+
 
 def startup():
     """Function that runs once when the application starts"""
@@ -104,6 +110,9 @@ def startup():
     print("  - GET /sr_item_item?text=<string>")
     print("  - GET /resync")
     print("  - GET /health")
+    print("  - POST /user/<user_id>/movie/<movie_id>/preference - Guardar preferencia")
+    print("  - GET /user/<user_id>/preferences - Obtener todas las preferencias")
+    print("  - GET /user/<user_id>/movie/<movie_id>/preference - Obtener preferencia de película")
 
 
 @app.route('/auth/signup', methods=['POST'])
@@ -235,6 +244,166 @@ def resync():
 def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
+
+
+@app.route('/user/<user_id>/movie/<movie_id>/preference', methods=['POST'])
+def save_movie_preference(user_id, movie_id):
+    """
+    Endpoint para guardar/actualizar la preferencia de un usuario para una película
+    
+    Body (JSON):
+    {
+        "rating": 3,  // opcional, número de 1-5
+        "liked": true,   // opcional, true para like, false para dislike
+        "visited": true  // opcional, true si el usuario vio la película
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'Request body is required'
+            }), 400
+        
+        rating = data.get('rating')
+        liked = data.get('liked')
+        visited = data.get('visited')
+        
+        # Validar que al menos uno de los parámetros esté presente
+        if rating is None and liked is None and visited is None:
+            return jsonify({
+                'success': False,
+                'message': 'At least rating, liked or visited must be provided'
+            }), 400
+        
+        # Validar rating si se proporciona
+        if rating is not None:
+            try:
+                rating = float(rating)
+                if rating < 1 or rating > 5:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Rating must be between 1 and 5'
+                    }), 400
+            except (ValueError, TypeError):
+                return jsonify({
+                    'success': False,
+                    'message': 'Rating must be a valid number'
+                }), 400
+        
+        db = next(get_db())
+        try:
+            preference = UserMoviePreferenceService.save_preference(
+                db=db,
+                user_id=int(user_id),
+                movie_id=movie_id,
+                rating=rating,
+                liked=liked,
+                visited=visited
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': 'Preference saved successfully',
+                'preference': {
+                    'id': preference.id,
+                    'user_id': preference.user_id,
+                    'movie_id': preference.movie_id,
+                    'rating': preference.rating,
+                    'liked': preference.liked,
+                    'visited': preference.visited,
+                    'created_at': preference.created_at.isoformat() if preference.created_at else None,
+                    'updated_at': preference.updated_at.isoformat() if preference.updated_at else None
+                }
+            }), 201
+        finally:
+            db.close()
+        
+    except Exception as error:
+        print(f"Error in save_movie_preference: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error saving preference'
+        }), 500
+
+
+@app.route('/user/<user_id>/preferences', methods=['GET'])
+def get_user_preferences(user_id):
+    """
+    Endpoint para obtener todas las preferencias de un usuario
+    """
+    try:
+        db = next(get_db())
+        try:
+            preferences = UserMoviePreferenceService.get_user_preferences(db, int(user_id))
+            
+            return jsonify({
+                'success': True,
+                'preferences': [
+                    {
+                        'id': p.id,
+                        'user_id': p.user_id,
+                        'movie_id': p.movie_id,
+                        'rating': p.rating,
+                        'liked': p.liked,
+                        'visited': p.visited,
+                        'created_at': p.created_at.isoformat() if p.created_at else None,
+                        'updated_at': p.updated_at.isoformat() if p.updated_at else None
+                    }
+                    for p in preferences
+                ]
+            }), 200
+        finally:
+            db.close()
+        
+    except Exception as error:
+        print(f"Error in get_user_preferences: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error retrieving preferences'
+        }), 500
+
+
+@app.route('/user/<user_id>/movie/<movie_id>/preference', methods=['GET'])
+def get_movie_preference(user_id, movie_id):
+    """
+    Endpoint para obtener la preferencia de un usuario para una película específica
+    """
+    try:
+        db = next(get_db())
+        try:
+            preference = UserMoviePreferenceService.get_preference(db, int(user_id), movie_id)
+            
+            if not preference:
+                return jsonify({
+                    'success': False,
+                    'message': 'Preference not found'
+                }), 404
+            
+            return jsonify({
+                'success': True,
+                'preference': {
+                    'id': preference.id,
+                    'user_id': preference.user_id,
+                    'movie_id': preference.movie_id,
+                    'rating': preference.rating,
+                    'liked': preference.liked,
+                    'visited': preference.visited,
+                    'created_at': preference.created_at.isoformat() if preference.created_at else None,
+                    'updated_at': preference.updated_at.isoformat() if preference.updated_at else None
+                }
+            }), 200
+        finally:
+            db.close()
+        
+    except Exception as error:
+        print(f"Error in get_movie_preference: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error retrieving preference'
+        }), 500
 
 
 if __name__ == '__main__':

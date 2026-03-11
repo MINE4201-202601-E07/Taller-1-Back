@@ -1,6 +1,7 @@
 from database.connection import engine, Base, get_db
 from modules.users.user_service import UserService
 from modules.users.user_model import User
+from modules.users.user_movie_preference_model import UserMoviePreference
 
 # Crear tablas
 Base.metadata.create_all(bind=engine)
