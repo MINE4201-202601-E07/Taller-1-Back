@@ -6,6 +6,7 @@ from modules.users.user_movie_preference_service import UserMoviePreferenceServi
 from modules.users.user_movie_preference_model import UserMoviePreference
 from modules.users.user_service import UserService
 from modules.users.user_model import User
+from modules.movies.movie_model import Movie
 
 # Conjunto de películas disponibles
 MOVIES = [
@@ -112,7 +113,6 @@ def startup():
     print("  - GET /sr_item_item?text=<string>")
     print("  - GET /resync")
     print("  - GET /health")
-    print("  - POST /user/<user_id>/movie/<movie_id>/preference - Guardar preferencia")
     print("  - GET /user/<user_id>/preferences - Obtener todas las preferencias")
     print("  - GET /user/<user_id>/movie/<movie_id>/preference - Obtener preferencia de película")
 
@@ -272,89 +272,6 @@ def health():
     return jsonify({'status': 'healthy'})
 
 
-@app.route('/user/<user_id>/movie/<movie_id>/preference', methods=['POST'])
-def save_movie_preference(user_id, movie_id):
-    """
-    Endpoint para guardar/actualizar la preferencia de un usuario para una película
-    
-    Body (JSON):
-    {
-        "rating": 3,  // opcional, número de 1-5
-        "liked": true,   // opcional, true para like, false para dislike
-        "visited": true  // opcional, true si el usuario vio la película
-    }
-    """
-    try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                'success': False,
-                'message': 'Request body is required'
-            }), 400
-        
-        rating = data.get('rating')
-        liked = data.get('liked')
-        visited = data.get('visited')
-        
-        # Validar que al menos uno de los parámetros esté presente
-        if rating is None and liked is None and visited is None:
-            return jsonify({
-                'success': False,
-                'message': 'At least rating, liked or visited must be provided'
-            }), 400
-        
-        # Validar rating si se proporciona
-        if rating is not None:
-            try:
-                rating = float(rating)
-                if rating < 1 or rating > 5:
-                    return jsonify({
-                        'success': False,
-                        'message': 'Rating must be between 1 and 5'
-                    }), 400
-            except (ValueError, TypeError):
-                return jsonify({
-                    'success': False,
-                    'message': 'Rating must be a valid number'
-                }), 400
-        
-        db = next(get_db())
-        try:
-            preference = UserMoviePreferenceService.save_preference(
-                db=db,
-                user_id=int(user_id),
-                movie_id=movie_id,
-                rating=rating,
-                liked=liked,
-                visited=visited
-            )
-            
-            return jsonify({
-                'success': True,
-                'message': 'Preference saved successfully',
-                'preference': {
-                    'id': preference.id,
-                    'user_id': preference.user_id,
-                    'movie_id': preference.movie_id,
-                    'rating': preference.rating,
-                    'liked': preference.liked,
-                    'visited': preference.visited,
-                    'created_at': preference.created_at.isoformat() if preference.created_at else None,
-                    'updated_at': preference.updated_at.isoformat() if preference.updated_at else None
-                }
-            }), 201
-        finally:
-            db.close()
-        
-    except Exception as error:
-        print(f"Error in save_movie_preference: {error}")
-        return jsonify({
-            'success': False,
-            'message': 'Error saving preference'
-        }), 500
-
-
 @app.route('/user/<user_id>/preferences', methods=['GET'])
 def get_user_preferences(user_id):
     """
@@ -430,6 +347,19 @@ def get_movie_preference(user_id, movie_id):
             'success': False,
             'message': 'Error retrieving preference'
         }), 500
+
+def convert_movie_to_json(movie: Movie):
+    """Función para crear un JSON de película a partir de un objeto Movie"""
+    # Obtener el primer link de IMDB si existe
+    imdb_id = movie.movie_links[0].imdb_id if movie.movie_links else None
+    imdb_link = f"https://www.imdb.com/title/tt0{imdb_id}/" if imdb_id else None
+    
+    return {
+        'id': movie.movie_id,
+        'name': movie.title,
+        'genre': movie.genres,
+        'imdbLink': imdb_link
+    }
 
 
 if __name__ == '__main__':
