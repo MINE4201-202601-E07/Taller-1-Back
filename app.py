@@ -1,6 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import random
+from database.connection import engine, Base, get_db
+from modules.users.user_movie_preference_service import UserMoviePreferenceService
+from modules.users.user_movie_preference_model import UserMoviePreference
+from modules.users.user_service import UserService
+from modules.users.user_model import User
+from modules.movies.movie_model import Movie
 
 # Conjunto de películas disponibles
 MOVIES = [
@@ -86,11 +92,14 @@ MOVIES = [
     }
 ]
 
-# Base de datos en memoria para usuarios (en producción usar una BD real)
-USERS = {}
+# Base de datos en SQLite (se crea automáticamente)
+# USERS dictionary ya no es necesario - usamos SQLAlchemy ORM
 
 app = Flask(__name__)
 CORS(app)
+
+# Crear tablas de la base de datos
+Base.metadata.create_all(bind=engine)
 
 
 def startup():
@@ -104,11 +113,13 @@ def startup():
     print("  - GET /sr_item_item?text=<string>")
     print("  - GET /resync")
     print("  - GET /health")
+    print("  - GET /user/<user_id>/preferences - Obtener todas las preferencias")
+    print("  - GET /user/<user_id>/movie/<movie_id>/preference - Obtener preferencia de película")
 
 
 @app.route('/auth/signup', methods=['POST'])
 def signup():
-    """Endpoint para registrar un nuevo usuario"""
+    """Endpoint para registrar un nuevo usuario en SQLite"""
     try:
         data = request.get_json()
         
@@ -120,36 +131,35 @@ def signup():
             }), 400
         
         email = data.get('email')
+        password = data.get('password', '')
+        name = data.get('name', '')
         
-        # Verificar si el email ya está registrado
-        for existing_user in USERS.values():
-            if existing_user['email'] == email:
+        # Obtener conexión a la BD
+        db = next(get_db())
+        
+        try:
+            # Verificar si el email ya está registrado
+            existing_user = db.query(User).filter_by(email=email).first()
+            if existing_user:
                 return jsonify({
                     'success': False,
                     'message': 'Email already registered'
                 }), 400
-        
-        # Generar nuevo ID basado en la última entrada
-        if USERS:
-            last_id = max(int(user_id) for user_id in USERS.keys())
-            new_id = str(last_id + 1)
-        else:
-            new_id = "1"
-        
-        # Crear nuevo usuario
-        USERS[new_id] = {
-            'id': new_id,
-            'email': email
-        }
-        
-        return jsonify({
-            'success': True,
-            'message': 'User registered successfully',
-            'user': {
-                'id': new_id,
-                'email': email
-            }
-        }), 201
+            
+            # Crear nuevo usuario en la BD
+            user = UserService.create_user(db, email, name, password)
+            
+            return jsonify({
+                'success': True,
+                'message': 'User registered successfully',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name
+                }
+            }), 201
+        finally:
+            db.close()
         
     except Exception as error:
         print(f"Error in signup: {error}")
@@ -161,11 +171,11 @@ def signup():
 
 @app.route('/auth/login', methods=['POST'])
 def login():
-    """Endpoint para autenticar un usuario"""
+    """Endpoint para autenticar un usuario desde SQLite"""
     try:
         data = request.get_json()
         
-        # Validación del ID en lugar del email
+        # Validación del ID
         if not data or not data.get('id'):
             return jsonify({
                 'success': False,
@@ -173,29 +183,29 @@ def login():
             }), 400
         
         user_id = data.get('id')
-        print(f"Attempting login with ID: {user_id}")
-        print(f"Current users in system: {USERS}")
-        # Buscar usuario por ID
-        user = None
-        for existing_user in USERS.keys():
-            if existing_user == user_id:
-                user = USERS[existing_user]
-                break
         
-        if not user:
+        db = next(get_db())
+        
+        try:
+            user = UserService.get_user_by_id(db, user_id)
+            
+            if not user:
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid ID'
+                }), 401
+            
             return jsonify({
-                'success': False,
-                'message': 'Invalid ID'
-            }), 401
-        
-        return jsonify({
-            'success': True,
-            'message': 'Login successful',
-            'user': {
-                'id': user['id'],
-                'email': user['email']
-            }
-        }), 200
+                'success': True,
+                'message': 'Login successful',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name
+                }
+            }), 200
+        finally:
+            db.close()
         
     except Exception as error:
         print(f"Error in login: {error}")
@@ -206,9 +216,34 @@ def login():
 
 @app.route('/user', methods=['GET'])
 def get_user():
+    """Obtener información de un usuario desde SQLite"""
     user_id = request.args.get('userId', type=int)
-    user = USERS.get(user_id)
-    return jsonify({'user': user})
+    
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': 'userId is required'
+        }), 400
+    
+    db = next(get_db())
+    try:
+        user = UserService.get_user_by_id(db, user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name
+            }
+        })
+    finally:
+        db.close()
 
 @app.route('/sr_user_user', methods=['GET'])
 def sr_user_user():
@@ -235,6 +270,96 @@ def resync():
 def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
+
+
+@app.route('/user/<user_id>/preferences', methods=['GET'])
+def get_user_preferences(user_id):
+    """
+    Endpoint para obtener todas las preferencias de un usuario
+    """
+    try:
+        db = next(get_db())
+        try:
+            preferences = UserMoviePreferenceService.get_user_preferences(db, int(user_id))
+            
+            return jsonify({
+                'success': True,
+                'preferences': [
+                    {
+                        'id': p.id,
+                        'user_id': p.user_id,
+                        'movie_id': p.movie_id,
+                        'rating': p.rating,
+                        'liked': p.liked,
+                        'visited': p.visited,
+                        'created_at': p.created_at.isoformat() if p.created_at else None,
+                        'updated_at': p.updated_at.isoformat() if p.updated_at else None
+                    }
+                    for p in preferences
+                ]
+            }), 200
+        finally:
+            db.close()
+        
+    except Exception as error:
+        print(f"Error in get_user_preferences: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error retrieving preferences'
+        }), 500
+
+
+@app.route('/user/<user_id>/movie/<movie_id>/preference', methods=['GET'])
+def get_movie_preference(user_id, movie_id):
+    """
+    Endpoint para obtener la preferencia de un usuario para una película específica
+    """
+    try:
+        db = next(get_db())
+        try:
+            preference = UserMoviePreferenceService.get_preference(db, int(user_id), movie_id)
+            
+            if not preference:
+                return jsonify({
+                    'success': False,
+                    'message': 'Preference not found'
+                }), 404
+            
+            return jsonify({
+                'success': True,
+                'preference': {
+                    'id': preference.id,
+                    'user_id': preference.user_id,
+                    'movie_id': preference.movie_id,
+                    'rating': preference.rating,
+                    'liked': preference.liked,
+                    'visited': preference.visited,
+                    'created_at': preference.created_at.isoformat() if preference.created_at else None,
+                    'updated_at': preference.updated_at.isoformat() if preference.updated_at else None
+                }
+            }), 200
+        finally:
+            db.close()
+        
+    except Exception as error:
+        print(f"Error in get_movie_preference: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error retrieving preference'
+        }), 500
+
+def convert_movie_to_json(movie: Movie):
+    """Función para crear un JSON de película a partir de un objeto Movie"""
+    # Obtener el primer link de IMDB si existe
+    imdb_id = movie.movie_links[0].imdb_id if movie.movie_links else None
+    imdb_link = f"https://www.imdb.com/title/tt0{imdb_id}/" if imdb_id else None
+    
+    return {
+        'id': movie.movie_id,
+        'name': movie.title,
+        'genre': movie.genres,
+        'imdbLink': imdb_link
+    }
 
 
 if __name__ == '__main__':
