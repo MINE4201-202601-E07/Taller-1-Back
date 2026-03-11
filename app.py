@@ -4,6 +4,8 @@ import random
 from database.connection import engine, Base, get_db
 from modules.users.user_movie_preference_service import UserMoviePreferenceService
 from modules.users.user_movie_preference_model import UserMoviePreference
+from modules.users.user_service import UserService
+from modules.users.user_model import User
 
 # Conjunto de películas disponibles
 MOVIES = [
@@ -89,8 +91,8 @@ MOVIES = [
     }
 ]
 
-# Base de datos en memoria para usuarios (en producción usar una BD real)
-USERS = {}
+# Base de datos en SQLite (se crea automáticamente)
+# USERS dictionary ya no es necesario - usamos SQLAlchemy ORM
 
 app = Flask(__name__)
 CORS(app)
@@ -117,7 +119,7 @@ def startup():
 
 @app.route('/auth/signup', methods=['POST'])
 def signup():
-    """Endpoint para registrar un nuevo usuario"""
+    """Endpoint para registrar un nuevo usuario en SQLite"""
     try:
         data = request.get_json()
         
@@ -129,36 +131,35 @@ def signup():
             }), 400
         
         email = data.get('email')
+        password = data.get('password', '')
+        name = data.get('name', '')
         
-        # Verificar si el email ya está registrado
-        for existing_user in USERS.values():
-            if existing_user['email'] == email:
+        # Obtener conexión a la BD
+        db = next(get_db())
+        
+        try:
+            # Verificar si el email ya está registrado
+            existing_user = db.query(User).filter_by(email=email).first()
+            if existing_user:
                 return jsonify({
                     'success': False,
                     'message': 'Email already registered'
                 }), 400
-        
-        # Generar nuevo ID basado en la última entrada
-        if USERS:
-            last_id = max(int(user_id) for user_id in USERS.keys())
-            new_id = str(last_id + 1)
-        else:
-            new_id = "1"
-        
-        # Crear nuevo usuario
-        USERS[new_id] = {
-            'id': new_id,
-            'email': email
-        }
-        
-        return jsonify({
-            'success': True,
-            'message': 'User registered successfully',
-            'user': {
-                'id': new_id,
-                'email': email
-            }
-        }), 201
+            
+            # Crear nuevo usuario en la BD
+            user = UserService.create_user(db, email, name, password)
+            
+            return jsonify({
+                'success': True,
+                'message': 'User registered successfully',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': user.name
+                }
+            }), 201
+        finally:
+            db.close()
         
     except Exception as error:
         print(f"Error in signup: {error}")
@@ -170,7 +171,7 @@ def signup():
 
 @app.route('/auth/login', methods=['POST'])
 def login():
-    """Endpoint para autenticar un usuario"""
+    """Endpoint para autenticar un usuario desde SQLite"""
     try:
         data = request.get_json()
         
@@ -181,17 +182,12 @@ def login():
                 'message': 'ID is required'
             }), 400
         
-        user_id = data.get('id')
-        print(f"Attempting login with ID: {user_id}")
-        print(f"Current users in system: {USERS}")
-        # Buscar usuario por ID
-        user = None
-        for existing_user in USERS.keys():
-            if existing_user == user_id:
-                user = USERS[existing_user]
-                break
+        db = next(get_db())
         
-        if not user:
+        user_id = data.get('id')
+        user = UserService.get_user_by_id(db, user_id)
+        
+        if not user_id:
             return jsonify({
                 'success': False,
                 'message': 'Invalid ID'
@@ -215,9 +211,34 @@ def login():
 
 @app.route('/user', methods=['GET'])
 def get_user():
+    """Obtener información de un usuario desde SQLite"""
     user_id = request.args.get('userId', type=int)
-    user = USERS.get(user_id)
-    return jsonify({'user': user})
+    
+    if not user_id:
+        return jsonify({
+            'success': False,
+            'message': 'userId is required'
+        }), 400
+    
+    db = next(get_db())
+    try:
+        user = UserService.get_user_by_id(db, user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name
+            }
+        })
+    finally:
+        db.close()
 
 @app.route('/sr_user_user', methods=['GET'])
 def sr_user_user():
