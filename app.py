@@ -248,6 +248,7 @@ def get_user():
 @app.route('/sr_user_user', methods=['GET'])
 def sr_user_user():
     """First endpoint that returns random movies"""
+    # TODO
     limit = request.args.get('limit', default=5, type=int)
     movies_subset = random.sample(MOVIES, min(limit, len(MOVIES)))
     return jsonify({'movies': movies_subset})
@@ -256,6 +257,7 @@ def sr_user_user():
 @app.route('/sr_item_item', methods=['GET'])
 def sr_item_item():
     """Second endpoint that returns random movies"""
+    # TODO
     limit = request.args.get('limit', default=5, type=int)
     movies_subset = random.sample(MOVIES, min(limit, len(MOVIES)))
     return jsonify({'movies': movies_subset})
@@ -290,8 +292,6 @@ def get_user_preferences(user_id):
                         'user_id': p.user_id,
                         'movie_id': p.movie_id,
                         'rating': p.rating,
-                        'liked': p.liked,
-                        'visited': p.visited,
                         'created_at': p.created_at.isoformat() if p.created_at else None,
                         'updated_at': p.updated_at.isoformat() if p.updated_at else None
                     }
