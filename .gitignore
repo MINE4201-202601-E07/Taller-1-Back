@@ -6,3 +6,6 @@ modules/users/__pycache__/user_service.cpython-314.pyc
 .DS_Store
 *.sqlite
 db/app.sqlite
+db/app.sqlite-wal
+db/app.sqlite-shm
+test_app.py
