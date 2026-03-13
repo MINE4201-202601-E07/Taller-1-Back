@@ -114,6 +114,7 @@ def startup():
     print("  - GET /resync")
     print("  - GET /health")
     print("  - GET /user/<user_id>/preferences - Obtener todas las preferencias")
+    print("  - GET /user/<user_id>/preferences/details - Obtener preferencias con detalles de películas")
     print("  - GET /user/<user_id>/movie/<movie_id>/preference - Obtener preferencia de película")
 
 
@@ -276,6 +277,7 @@ def health():
 
 @app.route('/user/<user_id>/preferences', methods=['GET'])
 def get_user_preferences(user_id):
+    print (f"Received request for user_id: {user_id}")
     """
     Endpoint para obtener todas las preferencias de un usuario
     """
@@ -303,6 +305,42 @@ def get_user_preferences(user_id):
         
     except Exception as error:
         print(f"Error in get_user_preferences: {error}")
+        return jsonify({
+            'success': False,
+            'message': 'Error retrieving preferences'
+        }), 500
+
+
+@app.route('/user/<user_id>/preferences/details', methods=['GET'])
+def get_user_preferences_with_details(user_id):
+    """
+    Endpoint para obtener todas las preferencias de un usuario con detalles de las películas
+    
+    Retorna un JSON con:
+    - success: boolean
+    - preferences: lista de objetos con:
+        - id, user_id, movie_id, rating, created_at, updated_at
+        - movie: objeto con title, genres, movie_id
+    """
+    try:
+        db = next(get_db())
+        try:
+            preferences = UserMoviePreferenceService.get_user_preferences_with_details(db, int(user_id))
+            
+            return jsonify({
+                'success': True,
+                'preferences': preferences
+            }), 200
+        finally:
+            db.close()
+        
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'message': 'Invalid user_id format'
+        }), 400
+    except Exception as error:
+        print(f"Error in get_user_preferences_with_details: {error}")
         return jsonify({
             'success': False,
             'message': 'Error retrieving preferences'

@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from modules.users.user_movie_preference_model import UserMoviePreference
+from modules.movies.movie_model import Movie
 
 class UserMoviePreferenceService:
     @staticmethod
@@ -62,3 +64,45 @@ class UserMoviePreferenceService:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def get_user_preferences_with_details(db: Session, user_id: int):
+        """
+        Obtener todas las preferencias de un usuario con detalles de las películas
+        
+        Retorna una lista de diccionarios con:
+        - id: ID de la preferencia
+        - user_id: ID del usuario
+        - movie_id: ID de la película
+        - rating: Rating otorgado por el usuario
+        - created_at: Fecha de creación
+        - updated_at: Última fecha de actualización
+        - movie: Objeto con detalles de la película (title, genres, movie_id)
+        """
+        preferences = db.query(UserMoviePreference).filter(
+            UserMoviePreference.user_id == user_id
+        ).all()
+        
+        result = []
+        for pref in preferences:
+            # Obtener los detalles de la película
+            movie = db.query(Movie).filter(
+                Movie.movie_id == int(pref.movie_id)
+            ).first()
+            
+            pref_dict = {
+                'id': pref.id,
+                'user_id': pref.user_id,
+                'movie_id': pref.movie_id,
+                'rating': pref.rating,
+                'created_at': pref.created_at.isoformat() if pref.created_at else None,
+                'updated_at': pref.updated_at.isoformat() if pref.updated_at else None,
+                'movie': {
+                    'movie_id': movie.movie_id,
+                    'title': movie.title,
+                    'genres': movie.genres
+                } if movie else None
+            }
+            result.append(pref_dict)
+        
+        return result
