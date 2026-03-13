@@ -9,3 +9,9 @@ Import MovieLens ratings into SQLite:
 python scripts/import_ratings.py --truncate
 
 This imports `movielens-20m-dataset/rating.csv` into `db/app.sqlite` table `user_movie_preferences` and sets `updated_at` to `NULL` for imported rows.
+
+Import MovieLens movies and links into SQLite:
+
+python scripts/import_movies_links.py --truncate
+
+This imports `movielens-20m-dataset/movie.csv` into table `movie` and `movielens-20m-dataset/link.csv` into table `movie_link`.

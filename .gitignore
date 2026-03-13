@@ -11,3 +11,4 @@ db/app.sqlite-shm
 __pycache__/
 **/__pycache__/
 test_app.py
+artifacts/

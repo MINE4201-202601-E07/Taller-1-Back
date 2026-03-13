@@ -1,99 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import random
 from database.connection import engine, Base, get_db
 from modules.users.user_movie_preference_service import UserMoviePreferenceService
-from modules.users.user_movie_preference_model import UserMoviePreference
 from modules.users.user_service import UserService
 from modules.users.user_model import User
 from modules.movies.movie_model import Movie
-
-# Conjunto de películas disponibles
-MOVIES = [
-    {
-        "id": "1",
-        "name": "The Shawshank Redemption",
-        "description": "Two imprisoned men bond over a number of years, finding solace and eventual redemption through acts of common decency.",
-        "genre": "Drama",
-        "rating": 9.3,
-        "imdbLink": "https://www.imdb.com/title/tt0111161/",
-        "releaseYear": 1994,
-        "director": "Frank Darabont"
-    },
-    {
-        "id": "2",
-        "name": "The Godfather",
-        "description": "The aging patriarch of an organized crime dynasty transfers control of his clandestine empire to his youngest son.",
-        "genre": "Crime",
-        "rating": 9.2,
-        "imdbLink": "https://www.imdb.com/title/tt0068646/",
-        "releaseYear": 1972,
-        "director": "Francis Ford Coppola"
-    },
-    {
-        "id": "3",
-        "name": "The Dark Knight",
-        "description": "When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest psychological risks.",
-        "genre": "Action",
-        "rating": 9.0,
-        "imdbLink": "https://www.imdb.com/title/tt0468569/",
-        "releaseYear": 2008,
-        "director": "Christopher Nolan"
-    },
-    {
-        "id": "4",
-        "name": "Pulp Fiction",
-        "description": "The lives of two mob hitmen, a boxer, a gangster and his wife intertwine in four tales of violence and redemption.",
-        "genre": "Crime",
-        "rating": 8.9,
-        "imdbLink": "https://www.imdb.com/title/tt0110912/",
-        "releaseYear": 1994,
-        "director": "Quentin Tarantino"
-    },
-    {
-        "id": "5",
-        "name": "Forrest Gump",
-        "description": "The presidencies of Kennedy and Johnson unfold from the perspective of an Alabama man with an IQ of 75.",
-        "genre": "Drama",
-        "rating": 8.8,
-        "imdbLink": "https://www.imdb.com/title/tt0109830/",
-        "releaseYear": 1994,
-        "director": "Robert Zemeckis"
-    },
-    {
-        "id": "6",
-        "name": "Inception",
-        "description": "A skilled thief who steals corporate secrets through dream-sharing technology is given the inverse task of planting an idea.",
-        "genre": "Sci-Fi",
-        "rating": 8.8,
-        "imdbLink": "https://www.imdb.com/title/tt1375666/",
-        "releaseYear": 2010,
-        "director": "Christopher Nolan"
-    },
-    {
-        "id": "7",
-        "name": "The Matrix",
-        "description": "A computer programmer discovers that reality as he knows it is a simulation created by machines.",
-        "genre": "Sci-Fi",
-        "rating": 8.7,
-        "imdbLink": "https://www.imdb.com/title/tt0133093/",
-        "releaseYear": 1999,
-        "director": "Lana Wachowski, Lilly Wachowski"
-    },
-    {
-        "id": "8",
-        "name": "Interstellar",
-        "description": "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.",
-        "genre": "Sci-Fi",
-        "rating": 8.6,
-        "imdbLink": "https://www.imdb.com/title/tt0816692/",
-        "releaseYear": 2014,
-        "director": "Christopher Nolan"
-    }
-]
-
-# Base de datos en SQLite (se crea automáticamente)
-# USERS dictionary ya no es necesario - usamos SQLAlchemy ORM
 
 app = Flask(__name__)
 CORS(app)
@@ -104,18 +15,18 @@ Base.metadata.create_all(bind=engine)
 
 def startup():
     """Function that runs once when the application starts"""
+    db = next(get_db())
+    try:
+        recalculated = UserMoviePreferenceService.ensure_popular_movies_cache(db)
+    finally:
+        db.close()
+
     print("✓ Application started successfully!")
     print("✓ Server is running on http://localhost:5000")
-    print("✓ Available endpoints:")
-    print("  - POST /auth/signup")
-    print("  - POST /auth/login")
-    print("  - GET /sr_user_user?text=<string>")
-    print("  - GET /sr_item_item?text=<string>")
-    print("  - GET /resync")
-    print("  - GET /health")
-    print("  - GET /user/<user_id>/preferences - Obtener todas las preferencias")
-    print("  - GET /user/<user_id>/preferences/details - Obtener preferencias con detalles de películas")
-    print("  - GET /user/<user_id>/movie/<movie_id>/preference - Obtener preferencia de película")
+    if recalculated:
+        print("✓ Popular movies cache initialized on startup")
+    else:
+        print("✓ Popular movies cache already exists (startup skipped recalculation)")
 
 
 @app.route('/auth/signup', methods=['POST'])
@@ -246,27 +157,58 @@ def get_user():
     finally:
         db.close()
 
+@app.route('/cold_start/<n>', methods=['GET'])
+def cold_start(n):
+    """Returns most popular movies"""
+    try:
+        db = next(get_db())
+        try:
+            num_movies = int(n)
+            force_refresh = request.args.get('refresh', '').lower() in {'1', 'true', 'yes'}
+            movies = UserMoviePreferenceService.get_most_popular_movies(
+                db,
+                num_movies,
+                force_refresh=force_refresh
+            )
+            movies_json = [convert_movie_to_json(movie) for movie in movies]
+            return jsonify({'success': True, 'movies': movies_json}), 200
+        finally:
+            db.close()
+    except Exception as error:
+        print(f"Error in cold_start: {error}")
+        return jsonify({'success': False, 'message': 'Error retrieving popular movies'}), 500
+
+
 @app.route('/sr_user_user', methods=['GET'])
 def sr_user_user():
-    """First endpoint that returns random movies"""
     # TODO
-    limit = request.args.get('limit', default=5, type=int)
-    movies_subset = random.sample(MOVIES, min(limit, len(MOVIES)))
-    return jsonify({'movies': movies_subset})
 
+    return jsonify({'movies': []})
 
 @app.route('/sr_item_item', methods=['GET'])
 def sr_item_item():
-    """Second endpoint that returns random movies"""
     # TODO
-    limit = request.args.get('limit', default=5, type=int)
-    movies_subset = random.sample(MOVIES, min(limit, len(MOVIES)))
-    return jsonify({'movies': movies_subset})
+
+    return jsonify({'movies': []})
 
 
 @app.route('/resync', methods=['GET'])
 def resync():
-    return jsonify({'endpoint': 'resync', 'status': 'resynced'})
+    db = next(get_db())
+    try:
+        max_items = request.args.get('max_items', default=200, type=int)
+        cached_movies = UserMoviePreferenceService.get_most_popular_movies(
+            db,
+            max_items,
+            force_refresh=True
+        )
+        return jsonify({
+            'endpoint': 'resync',
+            'status': 'resynced',
+            'popular_movies_cached': len(cached_movies)
+        })
+    finally:
+        db.close()
 
 
 @app.route('/health', methods=['GET'])
@@ -386,12 +328,19 @@ def get_movie_preference(user_id, movie_id):
             'message': 'Error retrieving preference'
         }), 500
 
-def convert_movie_to_json(movie: Movie):
-    """Función para crear un JSON de película a partir de un objeto Movie"""
-    # Obtener el primer link de IMDB si existe
+def convert_movie_to_json(movie):
+    """Crear JSON de película desde dict cacheado o desde objeto ORM Movie."""
+    if isinstance(movie, dict):
+        return {
+            'id': movie.get('movie_id'),
+            'name': movie.get('title'),
+            'genre': movie.get('genres'),
+            'imdbLink': movie.get('imdbLink')
+        }
+
     imdb_id = movie.movie_links[0].imdb_id if movie.movie_links else None
-    imdb_link = f"https://www.imdb.com/title/tt0{imdb_id}/" if imdb_id else None
-    
+    imdb_link = f"https://www.imdb.com/title/tt{str(imdb_id).zfill(7)}/" if imdb_id else None
+
     return {
         'id': movie.movie_id,
         'name': movie.title,
